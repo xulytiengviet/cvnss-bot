@@ -1,4 +1,4 @@
-(()=>{'use strict';const $=id=>document.getElementById(id);const cv=window.CVNSSConverter;let cfg={key:'',model:'deepseek/deepseek-r1',tokens:4096,effort:'medium',transport:'proxy'};let history=[],busy=false,controller=null;const system='Bạn là CVNSS Bot. Trả lời cuối cùng bằng tiếng Việt Unicode tự nhiên, chuẩn NFC. Nếu đầu vào là CVNSS4.0, hãy hiểu ý nghĩa rồi trả lời bằng Unicode tiếng Việt. Không đưa nội dung suy luận ẩn vào câu trả lời cuối.';function status(){}function settings(){ $('key').value=cfg.key;$('tokens').value=String(cfg.tokens);$('effort').value=cfg.effort;$('transport').value=cfg.transport;$('settings').showModal();}function bubble(role){const div=document.createElement('article');div.className='bubble '+role;const box=$('messages');box.appendChild(div);box.scrollTop=box.scrollHeight;return div;}function scroll(){$('messages').scrollTop=$('messages').scrollHeight;}function reasonOf(j){const d=j.choices?.[0]?.delta||{};if(typeof d.reasoning==='string')return d.reasoning;if(typeof d.reasoning_content==='string')return d.reasoning_content;if(Array.isArray(d.reasoning_details))return d.reasoning_details.map(x=>x?.text||x?.content||'').join('');return '';}function frame(text,onEvent){const data=text.split(/\r?\n/).filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');if(!data||data==='[DONE]')return;let j;try{j=JSON.parse(data);}catch{return;}onEvent(j);}function setBusy(yes){busy=yes;$('send').hidden=yes;$('stop').hidden=!yes;$('prompt').disabled=yes;}
+(()=>{'use strict';const $=id=>document.getElementById(id);const cv=window.CVNSSConverter;let cfg={key:'',model:'deepseek/deepseek-r1',tokens:8192,effort:'medium',transport:'proxy'};let history=[],busy=false,controller=null;const system='Bạn là CVNSS Bot. Trả lời cuối cùng bằng tiếng Việt Unicode tự nhiên, chuẩn NFC. Nếu đầu vào là CVNSS4.0, hãy hiểu ý nghĩa rồi trả lời bằng Unicode tiếng Việt. Không đưa nội dung suy luận ẩn vào câu trả lời cuối.';function status(){}function settings(){ $('key').value=cfg.key;$('tokens').value=String(cfg.tokens);$('effort').value=cfg.effort;$('transport').value=cfg.transport;$('settings').showModal();}function bubble(role){const div=document.createElement('article');div.className='bubble '+role;const box=$('messages');box.appendChild(div);box.scrollTop=box.scrollHeight;return div;}function scroll(){$('messages').scrollTop=$('messages').scrollHeight;}function reasonOf(j){const d=j.choices?.[0]?.delta||{};if(typeof d.reasoning==='string')return d.reasoning;if(typeof d.reasoning_content==='string')return d.reasoning_content;if(Array.isArray(d.reasoning_details))return d.reasoning_details.map(x=>x?.text||x?.content||'').join('');return '';}function frame(text,onEvent){const data=text.split(/\r?\n/).filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');if(!data||data==='[DONE]')return;let j;try{j=JSON.parse(data);}catch{return;}onEvent(j);}function setBusy(yes){busy=yes;$('send').hidden=yes;$('stop').hidden=!yes;$('prompt').disabled=yes;}
 /* Safe, batched Markdown presentation: DOM nodes, never innerHTML from model output. */
 const renderQueue=new Map();let renderPending=false;
 function inline(parent,value){
@@ -28,4 +28,86 @@ function renderMarkdown(target,raw){
  target.replaceChildren(root);
 }
 function queueAnswer(target,value){renderQueue.set(target,value);if(renderPending)return;renderPending=true;requestAnimationFrame(()=>{renderPending=false;for(const [element,content] of renderQueue)renderMarkdown(element,content);renderQueue.clear();});}
-async function send(e){e.preventDefault();if(busy)return;if(!cfg.key){settings();return;}if(!cv){alert('Không tải được bộ chuyển đổi CVNSS4.0.');return;}const input=$('prompt').value.trim();if(!input)return;if(history.length>=32){alert('Hội thoại quá dài, hãy tạo hội thoại mới.');return;}const user=bubble('user');user.textContent=input;$('prompt').value='';history.push({role:'user',content:input});const outer=bubble('assistant');const details=document.createElement('details');details.className='reason';details.open=true;const title=document.createElement('summary');title.textContent='Bot đang suy nghĩ';const pre=document.createElement('pre');pre.textContent='Đang chờ dữ liệu từ mô hình…';details.append(title,pre);const answer=document.createElement('div');answer.textContent='Đang trả lời…';outer.append(details,answer);controller=new AbortController();setBusy(true);let reply='',rawReason='';try{const payload={model:cfg.model,max_tokens:cfg.tokens,effort:cfg.effort,messages:[{role:'system',content:system},...history]};const direct=cfg.transport==='direct';const res=await fetch(direct?'https://openrouter.ai/api/v1/chat/completions':'/api/chat',{method:'POST',headers:direct?{'Content-Type':'application/json','Authorization':'Bearer '+cfg.key,'HTTP-Referer':location.origin,'X-Title':'CVNSS Bot'}:{'Content-Type':'application/json','X-OpenRouter-Key':cfg.key},body:JSON.stringify(direct?{...payload,stream:true,reasoning:{enabled:true,effort:cfg.effort}}:payload),signal:controller.signal});if(!res.ok){let err;try{err=await res.json()}catch{}throw Error(err?.error?.message||err?.error||'HTTP '+res.status);}if(!res.body)throw Error('API không hỗ trợ luồng dữ liệu.');const reader=res.body.getReader(),decoder=new TextDecoder();let pending='';const onEvent=j=>{if(j.error)throw Error(j.error.message||'Lỗi nhà cung cấp');const d=j.choices?.[0]?.delta||{};if(typeof d.content==='string'){reply+=d.content;queueAnswer(answer,reply);}const reason=reasonOf(j);if(reason){rawReason+=reason;if(rawReason.length<2000||rawReason.length%600<reason.length)pre.textContent=cv.fromCqn(rawReason).cvss;}scroll();};while(true){const {value,done}=await reader.read();if(done)break;pending+=decoder.decode(value,{stream:true});const frames=pending.split(/\r?\n\r?\n/);pending=frames.pop()||'';for(const f of frames)frame(f,onEvent);}pending+=decoder.decode();if(pending.trim())frame(pending,onEvent);if(rawReason)pre.textContent=cv.fromCqn(rawReason).cvss;else pre.textContent='Mô hình không cung cấp nội dung reasoning hiển thị được.';if(reply)queueAnswer(answer,reply);else answer.textContent='Mô hình chưa trả về nội dung Unicode.';if(reply)history.push({role:'assistant',content:reply.normalize('NFC')});else history.pop();}catch(err){if(!rawReason)pre.textContent='Không có dữ liệu reasoning do yêu cầu bị gián đoạn.';if(err.name==='AbortError'){if(reply)queueAnswer(answer,reply);else answer.textContent='Đã dừng.';if(reply)history.push({role:'assistant',content:reply});}else{answer.textContent='⚠ '+err.message;history.pop();}}finally{controller=null;setBusy(false);$('prompt').focus();scroll();}}$('chatForm').addEventListener('submit',send);$('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chatForm').requestSubmit();}});$('openSettings').onclick=settings;$('cancelSettings').onclick=()=>$('settings').close();$('settingsForm').addEventListener('submit',e=>{e.preventDefault();const key=$('key').value.trim();if(!/^sk-or-[\w-]{10,}$/.test(key)){alert('API Key không hợp lệ.');return;}cfg={...cfg,key,tokens:Number($('tokens').value),effort:$('effort').value,transport:$('transport').value};$('settings').close();status();});$('reset').onclick=()=>{history=[];$('messages').replaceChildren();};$('stop').onclick=()=>controller?.abort();$('probe').onclick=async()=>{const el=$('probeResult');el.textContent='Đang kiểm tra…';try{const r=await fetch('/api/chat?probe=1',{signal:AbortSignal.timeout(8500),cache:'no-store'});const j=await r.json();el.textContent=j.openrouter==='reachable'?'✓ Cloudflare kết nối được OpenRouter.':'⚠ Cloudflare chưa kết nối được OpenRouter: '+(j.error||j.upstream_status||'không xác định')+'. Có thể thử Trực tiếp.';}catch(e){el.textContent='⚠ Không gọi được API kiểm tra: '+e.message;}};status();})();
+async function send(e){
+ e.preventDefault();if(busy)return;
+ if(!cfg.key){settings();return;}
+ if(!cv){alert('Không tải được bộ chuyển đổi CVNSS4.0.');return;}
+ const input=$('prompt').value.trim();if(!input)return;
+ if(history.length>=32){alert('Hội thoại dài. Hãy tạo hội thoại mới.');return;}
+ bubble('user').textContent=input;$('prompt').value='';
+ history.push({role:'user',content:input});
+ const outer=bubble('assistant');
+ const thinking=document.createElement('details');thinking.className='reason';thinking.open=true;
+ const heading=document.createElement('summary');heading.textContent='Bot đang suy nghĩ';
+ const reasoningText=document.createElement('pre');reasoningText.textContent='Đang kết nối…';
+ thinking.append(heading,reasoningText);
+ const answer=document.createElement('div');answer.textContent='Đang chuẩn bị câu trả lời…';
+ outer.append(thinking,answer);
+ controller=new AbortController();setBusy(true);
+ let reply='',rawReason='',lastReasonRender=0,finishReason='',fallbackUsed=false;
+ const messages=[{role:'system',content:system},...history];
+ async function attempt(tokenBudget,reasoningEnabled){
+  const direct=cfg.transport==='direct';
+  const payload={model:cfg.model,messages,max_tokens:tokenBudget,effort:cfg.effort,reasoning_enabled:reasoningEnabled};
+  const endpoint=direct?'https://openrouter.ai/api/v1/chat/completions':'/api/chat';
+  const directPayload={model:cfg.model,messages,stream:true,max_tokens:tokenBudget,
+   reasoning:reasoningEnabled?{max_tokens:Math.min(cfg.effort==='low'?900:cfg.effort==='high'?3000:1700,Math.floor(tokenBudget*.3)),exclude:false}:{enabled:false}};
+  const res=await fetch(endpoint,{method:'POST',
+   headers:direct?{'Content-Type':'application/json','Authorization':'Bearer '+cfg.key,'HTTP-Referer':location.origin,'X-Title':'CVNSS Bot'}:
+    {'Content-Type':'application/json','X-OpenRouter-Key':cfg.key},
+   body:JSON.stringify(direct?directPayload:payload),signal:controller.signal});
+  if(!res.ok){let data;try{data=await res.json();}catch{}throw Error(data?.error?.message||data?.error||'API HTTP '+res.status);}
+  if(!res.body)throw Error('OpenRouter không cung cấp dữ liệu trực tuyến.');
+  const reader=res.body.getReader(),decoder=new TextDecoder();let pending='',doneMarker=false;
+  const process=packet=>{
+   const data=packet.split(/\r?\n/).filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trim()).join('\n');
+   if(!data)return;if(data==='[DONE]'){doneMarker=true;return;}
+   let j;try{j=JSON.parse(data);}catch{return;}
+   if(j.error)throw Error(j.error.message||'Lỗi từ OpenRouter.');
+   const choice=j.choices?.[0],d=choice?.delta||{};
+   if(choice?.finish_reason)finishReason=choice.finish_reason;
+   if(typeof d.content==='string'&&d.content){reply+=d.content;queueAnswer(answer,reply);}
+   const reason=reasonOf(j);
+   if(reason){rawReason+=reason;
+    const now=performance.now();
+    if(now-lastReasonRender>320){lastReasonRender=now;reasoningText.textContent=cv.fromCqn(rawReason).cvss;}
+   }
+   scroll();
+  };
+  for(;;){
+   const {done,value}=await reader.read();
+   pending+=decoder.decode(value||new Uint8Array(),{stream:!done});
+   const frames=pending.split(/\r?\n\r?\n/);pending=frames.pop()||'';
+   for(const part of frames)process(part);
+   if(done||doneMarker)break;
+  }
+  if(pending.trim())process(pending);
+ }
+ try{
+  await attempt(cfg.tokens,true);
+  if(!reply.trim()&&!controller.signal.aborted){
+   fallbackUsed=true;thinking.open=false;
+   answer.textContent='Đang tạo câu trả lời tiếng Việt…';
+   await attempt(12288,false);
+  }
+  if(rawReason)reasoningText.textContent=cv.fromCqn(rawReason).cvss;
+  else{reasoningText.textContent='Không có nội dung suy luận được mô hình cung cấp.';thinking.open=false;}
+  if(reply.trim()){
+   queueAnswer(answer,reply.normalize('NFC'));history.push({role:'assistant',content:reply.normalize('NFC')});
+  }else{
+   answer.textContent='Mô hình chưa tạo được câu trả lời tiếng Việt'+(finishReason==='length'?' vì đã dùng hết giới hạn token.':'.')+' Hãy chọn Nhanh trong Cài đặt hoặc thử lại.';
+   history.pop();
+  }
+ }catch(err){
+  if(err.name==='AbortError'){
+   if(reply){queueAnswer(answer,reply);history.push({role:'assistant',content:reply});}
+   else{answer.textContent='Đã dừng.';history.pop();}
+  }else{
+   answer.textContent='⚠ '+err.message+(fallbackUsed?' (Đã thử tạo lại câu trả lời.)':'');
+   if(reply)history.push({role:'assistant',content:reply});else history.pop();
+  }
+ }finally{
+  controller=null;setBusy(false);$('prompt').focus();scroll();
+ }
+}
+$('chatForm').addEventListener('submit',send);$('prompt').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chatForm').requestSubmit();}});$('openSettings').onclick=settings;$('cancelSettings').onclick=()=>$('settings').close();$('settingsForm').addEventListener('submit',e=>{e.preventDefault();const key=$('key').value.trim();if(!/^sk-or-[\w-]{10,}$/.test(key)){alert('API Key không hợp lệ.');return;}cfg={...cfg,key,tokens:Number($('tokens').value),effort:$('effort').value,transport:$('transport').value};$('settings').close();status();});$('reset').onclick=()=>{history=[];$('messages').replaceChildren();};$('stop').onclick=()=>controller?.abort();$('probe').onclick=async()=>{const el=$('probeResult');el.textContent='Đang kiểm tra…';try{const r=await fetch('/api/chat?probe=1',{signal:AbortSignal.timeout(8500),cache:'no-store'});const j=await r.json();el.textContent=j.openrouter==='reachable'?'✓ Cloudflare kết nối được OpenRouter.':'⚠ Cloudflare chưa kết nối được OpenRouter: '+(j.error||j.upstream_status||'không xác định')+'. Có thể thử Trực tiếp.';}catch(e){el.textContent='⚠ Không gọi được API kiểm tra: '+e.message;}};status();})();
