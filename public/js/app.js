@@ -2,7 +2,7 @@
 /* Safe, batched Markdown presentation: DOM nodes, never innerHTML from model output. */
 const renderQueue=new Map();let renderPending=false;
 function inline(parent,value){
- const parts=value.split(/(\\*\\*[^*\\n]+\\*\\*|\\*[^*\\n]+\\*|`[^`\\n]+`)/g);
+ const parts=value.split(/(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`)/g);
  for(const part of parts){if(!part)continue;let node;
  if(part.startsWith('**')&&part.endsWith('**')&&part.length>4){node=document.createElement('strong');node.textContent=part.slice(2,-2);}
  else if(part.startsWith('*')&&part.endsWith('*')&&part.length>2){node=document.createElement('em');node.textContent=part.slice(1,-1);}
@@ -11,16 +11,16 @@ function inline(parent,value){
  parent.append(node);}
 }
 function renderMarkdown(target,raw){
- const text=raw.normalize('NFC').replace(/\\r\\n?/g,'\\n');
+ const text=raw.normalize('NFC').replace(/\r\n?/g,'\n');
  const root=document.createDocumentFragment();let list=null,code=null,paragraph=null;
- for(const line of text.split('\\n')){
-  if(/^\\s*`{3}/.test(line)){if(code){code=null;}else{list=null;paragraph=null;const pre=document.createElement('pre');pre.className='answer-code';code=document.createElement('code');pre.append(code);root.append(pre);}continue;}
-  if(code){code.textContent+=(code.textContent?'\\n':'')+line;continue;}
+ for(const line of text.split('\n')){
+  if(/^\s*`{3}/.test(line)){if(code){code=null;}else{list=null;paragraph=null;const pre=document.createElement('pre');pre.className='answer-code';code=document.createElement('code');pre.append(code);root.append(pre);}continue;}
+  if(code){code.textContent+=(code.textContent?'\n':'')+line;continue;}
   if(!line.trim()){list=null;paragraph=null;continue;}
-  const heading=line.match(/^\\s{0,3}(#{1,6})\\s+(.+)$/);
+  const heading=line.match(/^\s{0,3}(#{1,6})\s+(.+)$/);
   if(heading){list=null;paragraph=null;const h=document.createElement('h'+Math.min(heading[1].length+1,6));h.className='answer-heading';inline(h,heading[2]);root.append(h);continue;}
-  if(/^\\s*(?:-{3,}|\\*{3,}|_{3,})\\s*$/.test(line)){list=null;paragraph=null;root.append(document.createElement('hr'));continue;}
-  const bullet=line.match(/^\\s*[-*+]\\s+(.+)$/),number=line.match(/^\\s*\\d+[.)]\\s+(.+)$/);
+  if(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)){list=null;paragraph=null;root.append(document.createElement('hr'));continue;}
+  const bullet=line.match(/^\s*[-*+]\s+(.+)$/),number=line.match(/^\s*\d+[.)]\s+(.+)$/);
   if(bullet||number){paragraph=null;const kind=number?'ol':'ul';if(!list||list.tagName.toLowerCase()!==kind){list=document.createElement(kind);root.append(list);}const li=document.createElement('li');inline(li,(bullet||number)[1]);list.append(li);continue;}
   list=null;if(!paragraph){paragraph=document.createElement('p');root.append(paragraph);}else paragraph.append(document.createElement('br'));
   inline(paragraph,line);
